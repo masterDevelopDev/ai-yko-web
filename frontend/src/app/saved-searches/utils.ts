@@ -1,0 +1,1 @@
+export const SAVED_SEARCHES_QUERY_KEY = ['SAVED_SEARCHES']

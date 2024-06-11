@@ -1,0 +1,210 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  DEACTIVATED
+}
+
+model User {
+  id               String     @id @default(uuid())
+  email            String     @unique
+  firstName        String
+  lastName         String
+  isEmailValidated Boolean    @default(false)
+  password         String
+  role             Role       @default(USER)
+  createdAt        DateTime   @default(now())
+  status           UserStatus @default(ACTIVE)
+
+  searchQueries     SearchQuery[]
+  categories        Category[]
+  createdDocuments  Document[]         @relation("creator")
+  editedDocuments   Document[]         @relation("editor")
+  favoritedRelation FavoriteDocument[]
+}
+
+enum Role {
+  USER
+  OPERATOR
+  ADMIN
+}
+
+enum DocumentStatus {
+  PROCESSING
+  INDEXED
+  ERROR
+}
+
+model Category {
+  id     String @id @default(uuid())
+  name   String
+  userId String
+
+  user                 User                  @relation(fields: [userId], references: [id])
+  documents            Document[]
+  searchQueries        SearchQuery[]
+  filterOrFilterGroups FilterOrFilterGroup[]
+
+  @@unique([userId, name])
+}
+
+model Document {
+  id                String             @id @default(uuid())
+  filename          String             @unique
+  url               String             @unique
+  categoryId        String // TODO: a trigger that checks that all filter values match the category of the document + trigger that prevents updating the category of document once it was set
+  creatorId         String?
+  editorId          String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  
+  creator           User?              @relation("creator", fields: [creatorId], references: [id])
+  editor            User?              @relation("editor", fields: [editorId], references: [id])
+  category          Category           @relation(fields: [categoryId], references: [id])
+  filterValues      FilterValue[]
+  images            Image[]
+  status            DocumentStatus     @default(PROCESSING)
+  favoritedRelation FavoriteDocument[]
+}
+
+enum TextFilterSearchMode {
+  EQUAL
+  CONTAINS
+  STARTSWITH
+  ENDSWITH
+  ISNULL
+  ISIN
+}
+
+enum DateFilterSearchMode {
+  EQUAL
+  BEFORE
+  AFTER
+  BEFORE_OR_EQUAL
+  AFTER_OR_EQUAL
+}
+
+model FilterValue {
+  id         Int       @id @default(autoincrement())
+  documentId String?
+  document   Document? @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  filterId String
+  filter   FilterOrFilterGroup @relation(fields: [filterId], references: [id], onDelete: Cascade) // todo: ondelete restrict
+
+  type FilterType
+
+  searchQuery   SearchQuery? @relation(fields: [searchQueryId], references: [id], onDelete: Cascade)
+  searchQueryId Int?
+
+  stringValue       String?
+  secondStringValue String?
+
+  integerValue       Int?
+  secondIntegerValue Int?
+
+  textMode TextFilterSearchMode?
+  dateMode DateFilterSearchMode?
+
+  negate Boolean?
+
+  // TODO: add trigger that enforces the consitency of this (choiceIds musrt be a subset of filterId's choiceIds)
+  choiceIds String[]
+
+  // TODO: add check constraint that checks that exactly one of filterChoiceId and value is non null
+  // TODO: add check constraint that checks that the filterChoiceId and the filterId match
+  // TODO: add checks for ensuring we have consistent values (cannot have dateMode and textMode non null for example)
+  // TODO: add unique constraint s [docid, filterid] and [searchid, filterid]
+  // TODO: if type is year, check that value is between 1900 and 2100
+
+  @@unique([filterId, documentId])
+  @@unique([filterId, searchQueryId])
+}
+
+enum MonitoringFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+model SearchQuery {
+  id                  Int                  @id @default(autoincrement())
+  text                String?
+  filterValues        FilterValue[]
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId              String
+  name                String
+  isMonitored         Boolean              @default(false)
+  monitoringFrequency MonitoringFrequency?
+  images              Image[]
+  categoryId          String?
+  category            Category?            @relation(fields: [categoryId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // TODO: add consistency checks
+}
+
+enum FilterKind {
+  GROUP
+  FILTER
+}
+
+enum FilterType {
+  DATE
+  TEXT
+  SINGLE_CHOICE
+  MULTI_CHOICE
+  YEAR
+  INTEGER
+}
+
+// https://www.prisma.io/docs/orm/prisma-schema/data-model/relations/self-relations
+model FilterOrFilterGroup {
+  id                        String                @id @default(uuid())
+  kind                      FilterKind
+  type                      FilterType?
+  name                      String
+  parentId                  String?
+  filterGroup               FilterOrFilterGroup?  @relation("filtersArborescence", fields: [parentId], references: [id], onDelete: SetNull)
+  children                  FilterOrFilterGroup[] @relation("filtersArborescence")
+  // TODO : add a check condition that ensures values are unique
+  options                   String[]
+  filterValuesForThisFilter FilterValue[]
+  categoryId                String                @default("generic")
+  category                  Category              @relation(fields: [categoryId], references: [id])
+
+  // TODO: add db checks for ensuring we have consistent values
+
+  // todo: add db trigger to check that parent is of same category
+
+  @@unique([name, parentId])
+}
+
+model Image {
+  id          Int          @id @default(autoincrement())
+  url         String
+  documentId  String?
+  document    Document?    @relation(fields: [documentId], references: [id])
+  searchId    Int?
+  searchQuery SearchQuery? @relation(fields: [searchId], references: [id])
+  embedding   Float[]
+}
+
+model FavoriteDocument {
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id])
+
+  @@unique([userId, documentId])
+}
